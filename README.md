@@ -27,6 +27,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     name: Deploy
     steps:
       - uses: actions/checkout@master
@@ -34,8 +36,12 @@ jobs:
       - run: npm run build
 
       - name: Publish
-        uses: menduz/oddish-action@2.0.1
+        uses: decentraland/oddish-action@2.0.1
+
         with:
+          access: public
+          provenance: true
+
           ### Working directory to publish
           # cwd: "./packages/package-a"
 
@@ -46,7 +52,6 @@ jobs:
 
           ### Optional scope for authenticating against scoped registries
           # scope: dcl
-          # access: public
 
           ## use action runId instead of current date to generate snapshot numbers
           # deterministic-snapshot: false
@@ -57,11 +62,9 @@ jobs:
           ### Set always-auth in npmrc
           # always-auth: true
 
-
           ### Gitlab pipeline trigger
           # gitlab-token: asdasd123
           # gitlab-pipeline-url: https://gitlab.example.com/api/v4/projects/9/trigger/pipeline
-
 
           ### Publish to S3
           # s3-bucket: my-cdn-bucket

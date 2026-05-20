@@ -157475,7 +157475,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __nccwpck_require__(42186);
 const io = __nccwpck_require__(47351);
-const artifact_1 = __nccwpck_require__(79450);
 const github = __nccwpck_require__(95438);
 const child_process_1 = __nccwpck_require__(32081);
 const form_data_1 = __importDefault(__nccwpck_require__(64334));
@@ -157487,6 +157486,7 @@ const fs = __nccwpck_require__(57147);
 const os = __nccwpck_require__(22037);
 const child_process_2 = __nccwpck_require__(32081);
 const path_1 = __nccwpck_require__(71017);
+const artifact_1 = __nccwpck_require__(79450);
 const cleanupSteps = [];
 const commitHash = (0, child_process_2.execSync)("git rev-parse HEAD").toString().trim();
 function readPackageJson(workingDirectory) {

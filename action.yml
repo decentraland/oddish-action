@@ -4,7 +4,7 @@ branding:
   color: "red"
 description: "Deploy your NPM package using oddish directly from GitHub"
 runs:
-  using: "node16"
+  using: "node20"
   main: "dist/index.js"
 outputs:
   version:

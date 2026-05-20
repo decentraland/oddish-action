@@ -157621,18 +157621,34 @@ function writeRegistryToFile(registryUrl, fileLocation, alwaysAuth) {
             }
         });
     }
+    // Detect whether OIDC (npm Trusted Publishing) is available. GitHub Actions
+    // exposes ACTIONS_ID_TOKEN_REQUEST_URL only when the job grants
+    // `permissions: id-token: write`. When the caller did not provide an explicit
+    // NODE_AUTH_TOKEN but OIDC is available, we skip the _authToken line and the
+    // dummy env so npm can exchange the OIDC token for publish credentials.
+    // See: https://docs.npmjs.com/trusted-publishers
+    const hasExplicitToken = !!process.env.NODE_AUTH_TOKEN;
+    const hasOIDC = !!process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const useOIDC = !hasExplicitToken && hasOIDC;
     // Remove http: or https: from front of registry.
     const authString = registryUrl.replace(/(^\w+:|^)/, "") + ":_authToken=${NODE_AUTH_TOKEN}";
     const registryString = scope
         ? `${scope}:registry=${registryUrl}`
         : `registry=${registryUrl}`;
     const alwaysAuthString = `always-auth=${alwaysAuth}`;
-    newContents += `${authString}${os.EOL}${registryString}${os.EOL}${alwaysAuthString}`;
+    if (useOIDC) {
+        console.log(`  using OIDC (npm Trusted Publishing) — skipping _authToken in .npmrc`);
+        newContents += `${registryString}${os.EOL}${alwaysAuthString}`;
+    }
+    else {
+        newContents += `${authString}${os.EOL}${registryString}${os.EOL}${alwaysAuthString}`;
+    }
     console.log(`  writing: ${fileLocation}`);
     fs.writeFileSync(fileLocation, newContents);
     core.exportVariable("NPM_CONFIG_USERCONFIG", fileLocation);
-    // Export empty node_auth_token so npm doesn't complain about not being able to find it
-    if (!process.env.NODE_AUTH_TOKEN) {
+    // Export empty node_auth_token so npm doesn't complain about not being able
+    // to find it. Skip this when using OIDC so the dummy doesn't shadow OIDC auth.
+    if (!useOIDC && !process.env.NODE_AUTH_TOKEN) {
         core.exportVariable("NODE_AUTH_TOKEN", "XXXXX-XXXXX-XXXXX-XXXXX");
     }
 }
@@ -157741,8 +157757,8 @@ const run = async () => {
     }
     const alwaysAuth = core.getInput("always-auth") || "false";
     const mainBranchLatestTag = core.getBooleanInput("main-branch-latest-tag");
-    if (!process.env.NODE_AUTH_TOKEN) {
-        core.warning(`! warn: variable NODE_AUTH_TOKEN is not set`);
+    if (!process.env.NODE_AUTH_TOKEN && !process.env.ACTIONS_ID_TOKEN_REQUEST_URL) {
+        core.warning(`! warn: variable NODE_AUTH_TOKEN is not set and OIDC is not available`);
     }
     if (process.env.NODE_AUTH_TOKEN || registryUrl) {
         configAuthentication(registryUrl, alwaysAuth, workingDirectory);

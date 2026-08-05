@@ -157497,10 +157497,10 @@ async function setCommitHash(workingDirectory) {
     packageJson.commit = commitHash;
     fs.writeFileSync(workingDirectory + "/package.json", JSON.stringify(packageJson, null, 2));
 }
-async function waitForVersionOnRegistry(data) {
-    const maxAttempts = 20;
-    const delaySeconds = 15;
-    const url = `${data.registryUrl.replace(/\/+$/, "")}/${encodeURIComponent(data.packageName)}`;
+async function waitForVersionOnRegistry({ packageName, packageVersion, registryUrl, }) {
+    const maxAttempts = Math.max(1, parseInt(core.getInput("registry-wait-attempts"), 10) || 20);
+    const delaySeconds = Math.max(1, parseInt(core.getInput("registry-wait-delay"), 10) || 15);
+    const url = `${registryUrl.replace(/\/+$/, "")}/${encodeURIComponent(packageName)}`;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
             const r = await (0, node_fetch_1.default)(url, {
@@ -157510,8 +157510,8 @@ async function waitForVersionOnRegistry(data) {
             });
             if (r.ok) {
                 const doc = (await r.json());
-                if (doc && doc.versions && doc.versions[data.packageVersion]) {
-                    core.info(`${data.packageName}@${data.packageVersion} is visible on the registry (attempt ${attempt})`);
+                if (doc && doc.versions && doc.versions[packageVersion]) {
+                    core.info(`${packageName}@${packageVersion} is visible on the registry (attempt ${attempt})`);
                     return true;
                 }
             }
@@ -157525,7 +157525,7 @@ async function waitForVersionOnRegistry(data) {
             core.info(`Registry check failed: ${e.message}`);
         }
         if (attempt < maxAttempts) {
-            core.info(`Attempt ${attempt}/${maxAttempts}: ${data.packageName}@${data.packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`);
+            core.info(`Attempt ${attempt}/${maxAttempts}: ${packageName}@${packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`);
             await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
         }
     }
@@ -157778,11 +157778,14 @@ async function getSnapshotVersion(workingDirectory, registryUrl) {
 async function getReleaseTags(workingDirectory, registry) {
     try {
         const json = JSON.parse(fs.readFileSync(workingDirectory + "/package.json", "utf8"));
-        const versions = await (0, node_fetch_1.default)(`${registry}/-/package/${json.name}/dist-tags`);
+        const versions = await (0, node_fetch_1.default)(`${registry}/-/package/${encodeURIComponent(json.name)}/dist-tags`, { timeout: 10000 });
         if (versions.ok) {
             return await versions.json();
         }
         else {
+            core.info(`Registry responded ${versions.status} fetching dist-tags`);
+            // Drain the body so node-fetch returns the socket to the pool.
+            await versions.text();
             return {};
         }
     }

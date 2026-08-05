@@ -157510,7 +157510,7 @@ async function waitForVersionOnRegistry({ packageName, packageVersion, registryU
             });
             if (r.ok) {
                 const doc = (await r.json());
-                if (doc && doc.versions && doc.versions[packageVersion]) {
+                if (doc && doc.versions && packageVersion in doc.versions) {
                     core.info(`${packageName}@${packageVersion} is visible on the registry (attempt ${attempt})`);
                     return true;
                 }
@@ -157523,7 +157523,7 @@ async function waitForVersionOnRegistry({ packageName, packageVersion, registryU
             }
         }
         catch (e) {
-            core.info(`Registry check failed: ${e.message}`);
+            core.info(`Registry check failed: ${e instanceof Error ? e.message : String(e)}`);
         }
         if (attempt < maxAttempts) {
             core.info(`Attempt ${attempt}/${maxAttempts}: ${packageName}@${packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`);
@@ -157539,6 +157539,8 @@ async function triggerPipeline(data) {
         return;
     if (!data.packageName)
         throw new Error("packageName is missing");
+    if (!data.packageVersion)
+        throw new Error("packageVersion is missing");
     // The registry is eventually consistent: triggering before the new version is
     // readable makes the pipeline's `npm pack` fail with ETARGET.
     const visible = await core.group("Waiting for the registry to serve the new version", () => waitForVersionOnRegistry(data));

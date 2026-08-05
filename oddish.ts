@@ -53,7 +53,7 @@ async function waitForVersionOnRegistry({
       });
       if (r.ok) {
         const doc = (await r.json()) as { versions?: Record<string, unknown> };
-        if (doc && doc.versions && doc.versions[packageVersion]) {
+        if (doc && doc.versions && packageVersion in doc.versions) {
           core.info(
             `${packageName}@${packageVersion} is visible on the registry (attempt ${attempt})`
           );
@@ -65,8 +65,8 @@ async function waitForVersionOnRegistry({
         const body = await r.text();
         core.debug(`Response body: ${body.slice(0, 500)}`);
       }
-    } catch (e: any) {
-      core.info(`Registry check failed: ${e.message}`);
+    } catch (e: unknown) {
+      core.info(`Registry check failed: ${e instanceof Error ? e.message : String(e)}`);
     }
     if (attempt < maxAttempts) {
       core.info(
@@ -89,6 +89,7 @@ async function triggerPipeline(data: {
 
   if (!GITLAB_STATIC_PIPELINE_URL) return;
   if (!data.packageName) throw new Error("packageName is missing");
+  if (!data.packageVersion) throw new Error("packageVersion is missing");
 
   // The registry is eventually consistent: triggering before the new version is
   // readable makes the pipeline's `npm pack` fail with ETARGET.

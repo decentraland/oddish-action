@@ -62,7 +62,8 @@ async function waitForVersionOnRegistry({
       } else {
         core.info(`Registry responded ${r.status}`);
         // Drain the body so node-fetch returns the socket to the pool.
-        await r.text();
+        const body = await r.text();
+        core.debug(`Response body: ${body.slice(0, 500)}`);
       }
     } catch (e: any) {
       core.info(`Registry check failed: ${e.message}`);
@@ -121,6 +122,7 @@ async function triggerPipeline(data: {
       const r = await fetch(GITLAB_STATIC_PIPELINE_URL, {
         body,
         method: "POST",
+        timeout: 10_000,
       });
       // Drain the body so node-fetch returns the socket to the pool.
       const responseText = await r.text();
@@ -128,7 +130,9 @@ async function triggerPipeline(data: {
       if (r.ok) {
         core.info(`Status: ${r.status}`);
       } else {
-        core.setFailed(`Error triggering pipeline. status: ${r.status}, body: ${responseText}`);
+        core.setFailed(
+          `Error triggering pipeline. status: ${r.status}, body: ${responseText.slice(0, 500)}`
+        );
       }
     } catch (e) {
       core.setFailed(`Error triggering pipeline. Unhandled error.`);

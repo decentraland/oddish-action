@@ -48,7 +48,7 @@ async function waitForVersionOnRegistry(data: {
         timeout: 10_000,
       });
       if (r.ok) {
-        const doc: any = await r.json();
+        const doc = (await r.json()) as { versions?: Record<string, unknown> };
         if (doc && doc.versions && doc.versions[data.packageVersion]) {
           core.info(
             `${data.packageName}@${data.packageVersion} is visible on the registry (attempt ${attempt})`
@@ -56,16 +56,19 @@ async function waitForVersionOnRegistry(data: {
           return true;
         }
       } else {
+        core.info(`Registry responded ${r.status}`);
         // Drain the body so node-fetch returns the socket to the pool.
         await r.text();
       }
     } catch (e: any) {
       core.info(`Registry check failed: ${e.message}`);
     }
-    core.info(
-      `Attempt ${attempt}/${maxAttempts}: ${data.packageName}@${data.packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`
-    );
-    await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+    if (attempt < maxAttempts) {
+      core.info(
+        `Attempt ${attempt}/${maxAttempts}: ${data.packageName}@${data.packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+    }
   }
   return false;
 }

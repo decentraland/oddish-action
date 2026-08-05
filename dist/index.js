@@ -157506,6 +157506,7 @@ async function waitForVersionOnRegistry(data) {
             const r = await (0, node_fetch_1.default)(url, {
                 // Abbreviated metadata: the same document `npm pack`/`npm install` read.
                 headers: { accept: "application/vnd.npm.install-v1+json" },
+                timeout: 10000,
             });
             if (r.ok) {
                 const doc = await r.json();
@@ -157514,12 +157515,16 @@ async function waitForVersionOnRegistry(data) {
                     return true;
                 }
             }
+            else {
+                // Drain the body so node-fetch returns the socket to the pool.
+                await r.text();
+            }
         }
         catch (e) {
             core.info(`Registry check failed: ${e.message}`);
         }
         core.info(`Attempt ${attempt}/${maxAttempts}: ${data.packageName}@${data.packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`);
-        await new Promise((r) => setTimeout(r, delaySeconds * 1000));
+        await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
     }
     return false;
 }

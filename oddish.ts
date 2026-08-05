@@ -31,6 +31,53 @@ async function setCommitHash(workingDirectory: string) {
   fs.writeFileSync(workingDirectory + "/package.json", JSON.stringify(packageJson, null, 2));
 }
 
+async function waitForVersionOnRegistry({
+  packageName,
+  packageVersion,
+  registryUrl,
+}: {
+  packageName: string;
+  packageVersion: string;
+  registryUrl: string;
+}): Promise<boolean> {
+  const maxAttempts = Math.max(1, parseInt(core.getInput("registry-wait-attempts"), 10) || 20);
+  const delaySeconds = Math.max(1, parseInt(core.getInput("registry-wait-delay"), 10) || 15);
+  const url = `${registryUrl.replace(/\/+$/, "")}/${encodeURIComponent(packageName)}`;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const r = await fetch(url, {
+        // Abbreviated metadata: the same document `npm pack`/`npm install` read.
+        headers: { accept: "application/vnd.npm.install-v1+json" },
+        timeout: 10_000,
+      });
+      if (r.ok) {
+        const doc = (await r.json()) as { versions?: Record<string, unknown> };
+        if (doc && doc.versions && packageVersion in doc.versions) {
+          core.info(
+            `${packageName}@${packageVersion} is visible on the registry (attempt ${attempt})`
+          );
+          return true;
+        }
+      } else {
+        core.info(`Registry responded ${r.status}`);
+        // Drain the body so node-fetch returns the socket to the pool.
+        const body = await r.text();
+        core.debug(`Response body: ${body.slice(0, 500)}`);
+      }
+    } catch (e: unknown) {
+      core.info(`Registry check failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (attempt < maxAttempts) {
+      core.info(
+        `Attempt ${attempt}/${maxAttempts}: ${packageName}@${packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+    }
+  }
+  return false;
+}
+
 async function triggerPipeline(data: {
   packageName: string;
   packageTag: string;
@@ -42,6 +89,19 @@ async function triggerPipeline(data: {
 
   if (!GITLAB_STATIC_PIPELINE_URL) return;
   if (!data.packageName) throw new Error("packageName is missing");
+  if (!data.packageVersion) throw new Error("packageVersion is missing");
+
+  // The registry is eventually consistent: triggering before the new version is
+  // readable makes the pipeline's `npm pack` fail with ETARGET.
+  const visible = await core.group("Waiting for the registry to serve the new version", () =>
+    waitForVersionOnRegistry(data)
+  );
+  if (!visible) {
+    core.setFailed(
+      `${data.packageName}@${data.packageVersion} never became visible on ${data.registryUrl}; not triggering the CDN pipeline`
+    );
+    return;
+  }
 
   await core.group("Triggering external pipeline", async () => {
     const body = new FormData();
@@ -63,12 +123,17 @@ async function triggerPipeline(data: {
       const r = await fetch(GITLAB_STATIC_PIPELINE_URL, {
         body,
         method: "POST",
+        timeout: 10_000,
       });
+      // Drain the body so node-fetch returns the socket to the pool.
+      const responseText = await r.text();
 
       if (r.ok) {
         core.info(`Status: ${r.status}`);
       } else {
-        core.setFailed(`Error triggering pipeline. status: ${r.status}`);
+        core.setFailed(
+          `Error triggering pipeline. status: ${r.status}, body: ${responseText.slice(0, 500)}`
+        );
       }
     } catch (e) {
       core.setFailed(`Error triggering pipeline. Unhandled error.`);
@@ -330,11 +395,17 @@ async function getReleaseTags(workingDirectory: string, registry: string) {
   try {
     const json = JSON.parse(fs.readFileSync(workingDirectory + "/package.json", "utf8"));
 
-    const versions = await fetch(`${registry}/-/package/${json.name}/dist-tags`);
+    const versions = await fetch(
+      `${registry}/-/package/${encodeURIComponent(json.name)}/dist-tags`,
+      { timeout: 10_000 }
+    );
 
     if (versions.ok) {
       return await versions.json();
     } else {
+      core.info(`Registry responded ${versions.status} fetching dist-tags`);
+      // Drain the body so node-fetch returns the socket to the pool.
+      await versions.text();
       return {};
     }
   } catch {

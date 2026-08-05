@@ -53,6 +53,14 @@ inputs:
     description: "gitlab pipeline URL"
     default: ""
     required: false
+  registry-wait-attempts:
+    description: "Max attempts polling the registry for the published version before triggering the gitlab pipeline"
+    default: "20"
+    required: false
+  registry-wait-delay:
+    description: "Seconds between registry polling attempts"
+    default: "15"
+    required: false
   s3-bucket:
     description: "Target s3 bucket"
     required: false

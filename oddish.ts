@@ -122,6 +122,8 @@ async function triggerPipeline(data: {
         body,
         method: "POST",
       });
+      // Drain the body so node-fetch returns the socket to the pool.
+      await r.text();
 
       if (r.ok) {
         core.info(`Status: ${r.status}`);

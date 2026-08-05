@@ -157567,12 +157567,12 @@ async function triggerPipeline(data) {
                 method: "POST",
             });
             // Drain the body so node-fetch returns the socket to the pool.
-            await r.text();
+            const responseText = await r.text();
             if (r.ok) {
                 core.info(`Status: ${r.status}`);
             }
             else {
-                core.setFailed(`Error triggering pipeline. status: ${r.status}`);
+                core.setFailed(`Error triggering pipeline. status: ${r.status}, body: ${responseText}`);
             }
         }
         catch (e) {

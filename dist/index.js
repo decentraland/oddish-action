@@ -157475,6 +157475,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __nccwpck_require__(42186);
 const io = __nccwpck_require__(47351);
+const artifact_1 = __nccwpck_require__(79450);
 const github = __nccwpck_require__(95438);
 const child_process_1 = __nccwpck_require__(32081);
 const form_data_1 = __importDefault(__nccwpck_require__(64334));
@@ -157486,7 +157487,6 @@ const fs = __nccwpck_require__(57147);
 const os = __nccwpck_require__(22037);
 const child_process_2 = __nccwpck_require__(32081);
 const path_1 = __nccwpck_require__(71017);
-const artifact_1 = __nccwpck_require__(79450);
 const cleanupSteps = [];
 const commitHash = (0, child_process_2.execSync)("git rev-parse HEAD").toString().trim();
 function readPackageJson(workingDirectory) {
@@ -157497,6 +157497,32 @@ async function setCommitHash(workingDirectory) {
     packageJson.commit = commitHash;
     fs.writeFileSync(workingDirectory + "/package.json", JSON.stringify(packageJson, null, 2));
 }
+async function waitForVersionOnRegistry(data) {
+    const maxAttempts = 20;
+    const delaySeconds = 15;
+    const url = `${data.registryUrl.replace(/\/+$/, "")}/${encodeURIComponent(data.packageName)}`;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const r = await (0, node_fetch_1.default)(url, {
+                // Abbreviated metadata: the same document `npm pack`/`npm install` read.
+                headers: { accept: "application/vnd.npm.install-v1+json" },
+            });
+            if (r.ok) {
+                const doc = await r.json();
+                if (doc && doc.versions && doc.versions[data.packageVersion]) {
+                    core.info(`${data.packageName}@${data.packageVersion} is visible on the registry (attempt ${attempt})`);
+                    return true;
+                }
+            }
+        }
+        catch (e) {
+            core.info(`Registry check failed: ${e.message}`);
+        }
+        core.info(`Attempt ${attempt}/${maxAttempts}: ${data.packageName}@${data.packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`);
+        await new Promise((r) => setTimeout(r, delaySeconds * 1000));
+    }
+    return false;
+}
 async function triggerPipeline(data) {
     const GITLAB_STATIC_PIPELINE_TOKEN = core.getInput("gitlab-token", { required: false });
     const GITLAB_STATIC_PIPELINE_URL = core.getInput("gitlab-pipeline-url", { required: false });
@@ -157504,6 +157530,13 @@ async function triggerPipeline(data) {
         return;
     if (!data.packageName)
         throw new Error("packageName is missing");
+    // The registry is eventually consistent: triggering before the new version is
+    // readable makes the pipeline's `npm pack` fail with ETARGET.
+    const visible = await core.group("Waiting for the registry to serve the new version", () => waitForVersionOnRegistry(data));
+    if (!visible) {
+        core.setFailed(`${data.packageName}@${data.packageVersion} never became visible on ${data.registryUrl}; not triggering the CDN pipeline`);
+        return;
+    }
     await core.group("Triggering external pipeline", async () => {
         const body = new form_data_1.default();
         if (GITLAB_STATIC_PIPELINE_TOKEN) {

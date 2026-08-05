@@ -31,6 +31,41 @@ async function setCommitHash(workingDirectory: string) {
   fs.writeFileSync(workingDirectory + "/package.json", JSON.stringify(packageJson, null, 2));
 }
 
+async function waitForVersionOnRegistry(data: {
+  packageName: string;
+  packageVersion: string;
+  registryUrl: string;
+}): Promise<boolean> {
+  const maxAttempts = 20;
+  const delaySeconds = 15;
+  const url = `${data.registryUrl.replace(/\/+$/, "")}/${encodeURIComponent(data.packageName)}`;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const r = await fetch(url, {
+        // Abbreviated metadata: the same document `npm pack`/`npm install` read.
+        headers: { accept: "application/vnd.npm.install-v1+json" },
+      });
+      if (r.ok) {
+        const doc: any = await r.json();
+        if (doc && doc.versions && doc.versions[data.packageVersion]) {
+          core.info(
+            `${data.packageName}@${data.packageVersion} is visible on the registry (attempt ${attempt})`
+          );
+          return true;
+        }
+      }
+    } catch (e: any) {
+      core.info(`Registry check failed: ${e.message}`);
+    }
+    core.info(
+      `Attempt ${attempt}/${maxAttempts}: ${data.packageName}@${data.packageVersion} not yet visible on the registry, retrying in ${delaySeconds}s...`
+    );
+    await new Promise((r) => setTimeout(r, delaySeconds * 1000));
+  }
+  return false;
+}
+
 async function triggerPipeline(data: {
   packageName: string;
   packageTag: string;
@@ -42,6 +77,18 @@ async function triggerPipeline(data: {
 
   if (!GITLAB_STATIC_PIPELINE_URL) return;
   if (!data.packageName) throw new Error("packageName is missing");
+
+  // The registry is eventually consistent: triggering before the new version is
+  // readable makes the pipeline's `npm pack` fail with ETARGET.
+  const visible = await core.group("Waiting for the registry to serve the new version", () =>
+    waitForVersionOnRegistry(data)
+  );
+  if (!visible) {
+    core.setFailed(
+      `${data.packageName}@${data.packageVersion} never became visible on ${data.registryUrl}; not triggering the CDN pipeline`
+    );
+    return;
+  }
 
   await core.group("Triggering external pipeline", async () => {
     const body = new FormData();

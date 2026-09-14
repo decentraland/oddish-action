@@ -54,8 +54,8 @@ inputs:
     default: ""
     required: false
   registry-wait-attempts:
-    description: "Max attempts polling the registry for the published version before triggering the gitlab pipeline"
-    default: "20"
+    description: "Max attempts polling the registry for the published version before triggering the gitlab pipeline. Default matches the deployer's 30-minute retry budget."
+    default: "120"
     required: false
   registry-wait-delay:
     description: "Seconds between registry polling attempts"

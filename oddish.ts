@@ -21,6 +21,24 @@ const cleanupSteps: Array<() => Promise<any>> = [];
 
 const commitHash = execSync("git rev-parse HEAD").toString().trim();
 
+// The command that versions, packs and publishes: npm, pnpm, or a pinned one such as `corepack pnpm@12.21.0`.
+const packageManager: string = core.getInput("package-manager") || "npm";
+// The value starts every command the shell runs, so anything outside those three forms stops here.
+if (!/^(npm|pnpm|corepack pnpm@[0-9A-Za-z.+-]+)$/.test(packageManager)) {
+  core.setFailed(`package-manager must be npm, pnpm or corepack pnpm@<version>, got ${JSON.stringify(packageManager)}`);
+  process.exit(1);
+}
+// pnpm refuses to version or publish from a branch or a dirty tree, which every snapshot build is.
+const gitChecksOff: string = packageManager === "npm" ? "" : " --no-git-checks";
+
+// Quotes a value so the shell that runs commands passes it through untouched: sh, or cmd.exe on Windows.
+function shellQuote(value: string): string {
+  if (process.platform !== "win32") return `'${value.replace(/'/g, `'\\''`)}'`;
+  // cmd.exe still reads % and " inside double quotes, so values holding them are refused.
+  if (/["%\r\n]/.test(value)) throw new Error(`cannot pass ${JSON.stringify(value)} safely to cmd.exe`);
+  return `"${value}"`;
+}
+
 function readPackageJson(workingDirectory: string) {
   return JSON.parse(fs.readFileSync(workingDirectory + "/package.json", "utf8").toString());
 }
@@ -168,9 +186,9 @@ async function uploadTarToS3(localFile: string) {
 async function createArtifacts(workingDirectory: string) {
   await core.group("Creating static artifact", async () => {
     try {
-      const packDetails: { filename: string }[] = JSON.parse(
-        await execute(`npm pack --json`, workingDirectory)
-      );
+      // npm prints an array of packed files, pnpm a single object.
+      const packed = JSON.parse(await execute(`${packageManager} pack --json`, workingDirectory));
+      const packDetails: { filename: string }[] = Array.isArray(packed) ? packed : [packed];
 
       for (let file of packDetails) {
         // This is workaround of a NPM bug which returns wrong filename
@@ -312,8 +330,10 @@ async function getBranch(workingDirectory: string): Promise<string> {
 
 async function setVersion(newVersion: string, workingDirectory: string): Promise<string> {
   core.setOutput("version", newVersion);
+  // pnpm has no --force; its git checks are what npm's --force skips.
+  const force = gitChecksOff || " --force";
   return execute(
-    `npm version "${newVersion}" --force --no-git-tag-version --allow-same-version`,
+    `${packageManager} version ${shellQuote(newVersion)}${force} --no-git-tag-version --allow-same-version`,
     workingDirectory
   );
 }
@@ -332,14 +352,15 @@ async function publish(
   const access = core.getInput("access", { required: false });
 
   if (access) {
-    args.push("--access", access);
+    args.push("--access", shellQuote(access));
   }
 
+  // A tag can come from a git tag's name, which may hold anything the shell would run.
   for (let tag of npmTags) {
-    args.push("--tag", JSON.stringify(tag));
+    args.push("--tag", shellQuote(tag));
   }
 
-  return execute(`npm publish ` + args.join(" "), workingDirectory);
+  return execute(`${packageManager} publish ` + args.join(" ") + gitChecksOff, workingDirectory);
 }
 
 async function getVersion(workingDirectory: string) {
@@ -559,7 +580,10 @@ const run = async () => {
   if (linkLatest) {
     try {
       if (!tags.latest || semver.gte(newVersion, tags.latest)) {
-        await execute(`npm dist-tag add ${packageName}@${newVersion} latest`, workingDirectory);
+        await execute(
+          `${packageManager} dist-tag add ${shellQuote(`${packageName}@${newVersion}`)} latest`,
+          workingDirectory
+        );
         console.log(`  publishing:\n    version: ${newVersion}`);
         core.setOutput("latest", "true");
       } else {
@@ -572,7 +596,8 @@ const run = async () => {
     core.setOutput("latest", "false");
   }
 
-  await execute(`npm info . dist-tags --json`, workingDirectory);
+  // pnpm looks packages up only by name, not by the `.` npm accepts.
+  await execute(`${packageManager} view ${shellQuote(packageName)} dist-tags --json`, workingDirectory);
 
   await triggerPipeline({
     packageName,

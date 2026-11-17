@@ -17,6 +17,10 @@ inputs:
   cwd:
     description: "Working directory"
     required: false
+  package-manager:
+    description: "Command that versions, packs and publishes: npm, pnpm, or a pinned one such as `corepack pnpm@12.21.0` (corepack ships with Node 24 and older); any other value fails the step"
+    default: "npm"
+    required: false
   provenance:
     description: "Use npm provenance"
     default: "true"

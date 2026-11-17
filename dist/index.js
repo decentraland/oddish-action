@@ -157489,6 +157489,10 @@ const child_process_2 = __nccwpck_require__(32081);
 const path_1 = __nccwpck_require__(71017);
 const cleanupSteps = [];
 const commitHash = (0, child_process_2.execSync)("git rev-parse HEAD").toString().trim();
+// The command that versions, packs and publishes: npm, pnpm, or a pinned one such as `corepack pnpm@12.21.0`.
+const packageManager = core.getInput("package-manager") || "npm";
+// pnpm refuses to version or publish from a branch or a dirty tree, which every snapshot build is.
+const gitChecksOff = /\bpnpm\b/.test(packageManager) ? " --no-git-checks" : "";
 function readPackageJson(workingDirectory) {
     return JSON.parse(fs.readFileSync(workingDirectory + "/package.json", "utf8").toString());
 }
@@ -157606,7 +157610,9 @@ async function uploadTarToS3(localFile) {
 async function createArtifacts(workingDirectory) {
     await core.group("Creating static artifact", async () => {
         try {
-            const packDetails = JSON.parse(await execute(`npm pack --json`, workingDirectory));
+            // npm prints an array of packed files, pnpm a single object.
+            const packed = JSON.parse(await execute(`${packageManager} pack --json`, workingDirectory));
+            const packDetails = Array.isArray(packed) ? packed : [packed];
             for (let file of packDetails) {
                 // This is workaround of a NPM bug which returns wrong filename
                 const filename = file.filename.replace(/^@/, "").replace(/\//, "-");
@@ -157728,7 +157734,9 @@ async function getBranch(workingDirectory) {
 }
 async function setVersion(newVersion, workingDirectory) {
     core.setOutput("version", newVersion);
-    return execute(`npm version "${newVersion}" --force --no-git-tag-version --allow-same-version`, workingDirectory);
+    // pnpm has no --force; its git checks are what npm's --force skips.
+    const force = gitChecksOff || " --force";
+    return execute(`${packageManager} version "${newVersion}"${force} --no-git-tag-version --allow-same-version`, workingDirectory);
 }
 async function publish(npmTags, workingDirectory, provenance) {
     core.setOutput("tags", npmTags.join(","));
@@ -157742,7 +157750,7 @@ async function publish(npmTags, workingDirectory, provenance) {
     for (let tag of npmTags) {
         args.push("--tag", JSON.stringify(tag));
     }
-    return execute(`npm publish ` + args.join(" "), workingDirectory);
+    return execute(`${packageManager} publish ` + args.join(" ") + gitChecksOff, workingDirectory);
 }
 async function getVersion(workingDirectory) {
     const json = readPackageJson(workingDirectory);
@@ -157921,7 +157929,7 @@ const run = async () => {
     if (linkLatest) {
         try {
             if (!tags.latest || semver.gte(newVersion, tags.latest)) {
-                await execute(`npm dist-tag add ${packageName}@${newVersion} latest`, workingDirectory);
+                await execute(`${packageManager} dist-tag add ${packageName}@${newVersion} latest`, workingDirectory);
                 console.log(`  publishing:\n    version: ${newVersion}`);
                 core.setOutput("latest", "true");
             }
@@ -157936,7 +157944,8 @@ const run = async () => {
     else {
         core.setOutput("latest", "false");
     }
-    await execute(`npm info . dist-tags --json`, workingDirectory);
+    // pnpm looks packages up only by name, not by the `.` npm accepts.
+    await execute(`${packageManager} view ${packageName} dist-tags --json`, workingDirectory);
     await triggerPipeline({
         packageName,
         packageVersion: newVersion,

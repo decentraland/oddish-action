@@ -45,6 +45,10 @@ jobs:
           ### Working directory to publish
           # cwd: "./packages/package-a"
 
+          ### Command that versions, packs and publishes (default npm). pnpm
+          ### skips its git checks, since snapshot builds run on branches.
+          # package-manager: "corepack pnpm@12.21.0"
+
           ### Optional registry to set up for auth. Will set the registry in a
           ### project level .npmrc and .yarnrc file, and set up auth to read in
           ### from env.NODE_AUTH_TOKEN

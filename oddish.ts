@@ -23,8 +23,18 @@ const commitHash = execSync("git rev-parse HEAD").toString().trim();
 
 // The command that versions, packs and publishes: npm, pnpm, or a pinned one such as `corepack pnpm@12.21.0`.
 const packageManager: string = core.getInput("package-manager") || "npm";
+// The value starts every command the shell runs, so anything outside those three forms stops here.
+if (!/^(npm|pnpm|corepack pnpm@[0-9A-Za-z.+-]+)$/.test(packageManager)) {
+  core.setFailed(`package-manager must be npm, pnpm or corepack pnpm@<version>, got ${JSON.stringify(packageManager)}`);
+  process.exit(1);
+}
 // pnpm refuses to version or publish from a branch or a dirty tree, which every snapshot build is.
-const gitChecksOff: string = /\bpnpm\b/.test(packageManager) ? " --no-git-checks" : "";
+const gitChecksOff: string = packageManager === "npm" ? "" : " --no-git-checks";
+
+// Wraps a value in single quotes so the shell passes it through untouched.
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
 function readPackageJson(workingDirectory: string) {
   return JSON.parse(fs.readFileSync(workingDirectory + "/package.json", "utf8").toString());
@@ -567,7 +577,7 @@ const run = async () => {
     try {
       if (!tags.latest || semver.gte(newVersion, tags.latest)) {
         await execute(
-          `${packageManager} dist-tag add ${packageName}@${newVersion} latest`,
+          `${packageManager} dist-tag add ${shellQuote(`${packageName}@${newVersion}`)} latest`,
           workingDirectory
         );
         console.log(`  publishing:\n    version: ${newVersion}`);
@@ -583,7 +593,7 @@ const run = async () => {
   }
 
   // pnpm looks packages up only by name, not by the `.` npm accepts.
-  await execute(`${packageManager} view ${packageName} dist-tags --json`, workingDirectory);
+  await execute(`${packageManager} view ${shellQuote(packageName)} dist-tags --json`, workingDirectory);
 
   await triggerPipeline({
     packageName,

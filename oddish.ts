@@ -31,9 +31,12 @@ if (!/^(npm|pnpm|corepack pnpm@[0-9A-Za-z.+-]+)$/.test(packageManager)) {
 // pnpm refuses to version or publish from a branch or a dirty tree, which every snapshot build is.
 const gitChecksOff: string = packageManager === "npm" ? "" : " --no-git-checks";
 
-// Wraps a value in single quotes so the shell passes it through untouched.
+// Quotes a value so the shell that runs commands passes it through untouched: sh, or cmd.exe on Windows.
 function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
+  if (process.platform !== "win32") return `'${value.replace(/'/g, `'\\''`)}'`;
+  // cmd.exe still reads % and " inside double quotes, so values holding them are refused.
+  if (/["%\r\n]/.test(value)) throw new Error(`cannot pass ${JSON.stringify(value)} safely to cmd.exe`);
+  return `"${value}"`;
 }
 
 function readPackageJson(workingDirectory: string) {
@@ -330,7 +333,7 @@ async function setVersion(newVersion: string, workingDirectory: string): Promise
   // pnpm has no --force; its git checks are what npm's --force skips.
   const force = gitChecksOff || " --force";
   return execute(
-    `${packageManager} version "${newVersion}"${force} --no-git-tag-version --allow-same-version`,
+    `${packageManager} version ${shellQuote(newVersion)}${force} --no-git-tag-version --allow-same-version`,
     workingDirectory
   );
 }
@@ -349,11 +352,12 @@ async function publish(
   const access = core.getInput("access", { required: false });
 
   if (access) {
-    args.push("--access", access);
+    args.push("--access", shellQuote(access));
   }
 
+  // A tag can come from a git tag's name, which may hold anything the shell would run.
   for (let tag of npmTags) {
-    args.push("--tag", JSON.stringify(tag));
+    args.push("--tag", shellQuote(tag));
   }
 
   return execute(`${packageManager} publish ` + args.join(" ") + gitChecksOff, workingDirectory);
